@@ -41,7 +41,7 @@ request(Method, URL, Headers, Body) ->
           <<"private, max-age: 0, no-cache, must-revalidate">>}
       | Headers
     ], Body, Client),
-  recv_all(Client).
+  recv_all(Client2).
 
 recv_all(Client) ->
   case cowboy_client:response(Client) of
