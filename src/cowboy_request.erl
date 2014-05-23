@@ -41,17 +41,18 @@ request(Method, URL, Headers, Body) ->
           <<"private, max-age: 0, no-cache, must-revalidate">>}
       | Headers
     ], Body, Client),
-  Result = case cowboy_client:response(Client2) of
-    {ok, Status, _ResHeaders, Client3} ->
-      case Client3#client.state of
-        % @fixme dirty hack, reports only first read chunk
+  recv_all(Client).
+
+recv_all(Client) ->
+  case cowboy_client:response(Client) of
+    {ok, Status, _ResHeaders, Client2} ->
+      case cowboy_client:state(Client2) of
         request ->
-% pecypc_log:info({buffer, _Status, Client3}),
-          {ok, Status, Client3#client.buffer};
+          timer:sleep(20),
+          recv_all(Client2);
         response_body ->
-          case cowboy_client:response_body(Client3) of
+          case cowboy_client:response_body(Client2) of
             {ok, ResBody, _} ->
-% pecypc_log:info({body, _Status, ResBody}),
               % @todo analyze Status
               {ok, Status, ResBody};
             Else ->
@@ -59,11 +60,8 @@ request(Method, URL, Headers, Body) ->
           end
       end;
     _Else ->
-% pecypc_log:info({reqerr, _Else}),
       {error, <<"server_error">>}
-  end,
-% pecypc_log:info({res, Result}),
-  Result.
+  end.
 
 make_uri(Scheme, Host, Path) ->
   << Scheme/binary, "://", Host/binary, Path/binary >>.
