@@ -13,24 +13,11 @@
 -export([urlencode/1]).
 -export([make_uri/3]).
 
--record(client, {
-  state = wait :: wait | request | response | response_body,
-  opts = [] :: [any()],
-  socket = undefined :: undefined | inet:socket(),
-  transport = undefined :: module(),
-  timeout = 5000 :: timeout(), %% @todo Configurable.
-  buffer = <<>> :: binary(),
-  connection = keepalive :: keepalive | close,
-  version = 'HTTP/1.1' :: cowboy_http:version(),
-  response_body = undefined :: undefined | non_neg_integer()
-}).
-
 request(Method, URL, Headers, Body) ->
 % pecypc_log:info({req, Method, URL, Body}),
-  {ok, Client0} = cowboy_client:init([]),
-  % NB: have to degrade protocol to not allow chunked responses
-  Client = Client0#client{version = 'HTTP/1.0'},
-  {ok, Client2} = cowboy_client:request(Method, URL, [
+  {ok, GunPid} = gun:open(URL, 80),
+  Tag = monitor(process, GunPid),
+  StreamRef = gun:request(GunPid, Method, URL, [
       {<<"connection">>, <<"close">>},
       {<<"accept-encoding">>, <<"identity">>},
       % {<<"accept">>, <<"application/json, text/html">>},
@@ -40,30 +27,37 @@ request(Method, URL, Headers, Body) ->
       {<<"cache-control">>,
           <<"private, max-age: 0, no-cache, must-revalidate">>}
       | Headers
-    ], Body, Client),
-  Result = case cowboy_client:response(Client2) of
-    {ok, Status, _ResHeaders, Client3} ->
-      case Client3#client.state of
-        % @fixme dirty hack, reports only first read chunk
-        request ->
-% pecypc_log:info({buffer, _Status, Client3}),
-          {ok, Status, Client3#client.buffer};
-        response_body ->
-          case cowboy_client:response_body(Client3) of
-            {ok, ResBody, _} ->
-% pecypc_log:info({body, _Status, ResBody}),
-              % @todo analyze Status
-              {ok, Status, ResBody};
-            Else ->
-              Else
-          end
-      end;
-    _Else ->
-% pecypc_log:info({reqerr, _Else}),
-      {error, <<"server_error">>}
-  end,
-% pecypc_log:info({res, Result}),
-  Result.
+    ], Body),
+  {ok, Status, _Headers, Body} = receive_response(GunPid, Tag, StreamRef),
+  io:format("Status: ~p, Body: ~p", [Status, Body]),
+  {ok, Status, Body}.
+
+receive_response(Pid, Tag, StreamRef) ->
+  receive
+    {'DOWN', Tag, _, _, Reason} ->
+      exit(Reason);
+    {gun_response, Pid, StreamRef, fin, Status, Headers} ->
+      {ok, Status, Headers, no_data};
+    {gun_response, Pid, StreamRef, nofin, Status, Headers} ->
+      {ok, Status, Headers, receive_data(Pid, Tag, StreamRef)}
+  after 1000 ->
+      exit(timeout)
+  end.
+
+receive_data(Pid, Tag, StreamRef) ->
+  receive_data(Pid, Tag, StreamRef, []).
+
+receive_data(Pid, Tag, StreamRef, DataAcc) ->
+  receive
+    {'DOWN', Tag, _, _, Reason} ->
+      {error, {incomplete, Reason}};
+    {gun_data, Pid, StreamRef, nofin, Data} ->
+      receive_data(Pid, Tag, StreamRef, [Data | DataAcc]);
+    {gun_data, Pid, StreamRef, fin, Data} ->
+      {ok, lists:reverse([Data | DataAcc])}
+  after 1000 ->
+      {error, timeout}
+  end.
 
 make_uri(Scheme, Host, Path) ->
   << Scheme/binary, "://", Host/binary, Path/binary >>.
