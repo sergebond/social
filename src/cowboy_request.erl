@@ -13,51 +13,40 @@
 -export([urlencode/1]).
 -export([make_uri/3]).
 
-request(Method, URL, Headers, Body) ->
-% pecypc_log:info({req, Method, URL, Body}),
-  {ok, GunPid} = gun:open(URL, 80),
-  Tag = monitor(process, GunPid),
-  StreamRef = gun:request(GunPid, Method, URL, [
-      {<<"connection">>, <<"close">>},
-      {<<"accept-encoding">>, <<"identity">>},
-      % {<<"accept">>, <<"application/json, text/html">>},
-      {<<"accept">>, <<"application/json">>},
-      {<<"content-type">>, <<"application/x-www-form-urlencoded">>},
-      {<<"pragma">>, <<"no-cache">>},
-      {<<"cache-control">>,
+-define(WITH_DEFAULT_HEADERS(Headers),
+        [
+         {<<"connection">>, <<"close">>},
+         {<<"accept-encoding">>, <<"identity">>},
+         %% {<<"accept">>, <<"application/json, text/html">>},
+         {<<"accept">>, <<"application/json">>},
+         {<<"content-type">>, <<"application/x-www-form-urlencoded">>},
+         {<<"pragma">>, <<"no-cache">>},
+         {<<"cache-control">>,
           <<"private, max-age: 0, no-cache, must-revalidate">>}
-      | Headers
-    ], Body),
-  {ok, Status, _Headers, Body} = receive_response(GunPid, Tag, StreamRef),
-  io:format("Status: ~p, Body: ~p", [Status, Body]),
-  {ok, Status, Body}.
+         | Headers]).
 
-receive_response(Pid, Tag, StreamRef) ->
-  receive
-    {'DOWN', Tag, _, _, Reason} ->
-      exit(Reason);
-    {gun_response, Pid, StreamRef, fin, Status, Headers} ->
-      {ok, Status, Headers, no_data};
-    {gun_response, Pid, StreamRef, nofin, Status, Headers} ->
-      {ok, Status, Headers, receive_data(Pid, Tag, StreamRef)}
-  after 1000 ->
-      exit(timeout)
-  end.
+-spec request(Method, URL, Headers, Body) ->
+  {ok, Status, RespBody} | {error, any()} when Method :: binary() | string(),
+                                               URL :: binary() | string(),
+                                               Headers :: [proplists:property()],
+                                               Body :: string() | binary(),
+                                               Status :: non_neg_integer(),
+                                               RespBody :: binary().
+request(MethodBin, URL, Headers, Body) when is_binary(MethodBin) ->
+  Method = list_to_atom(string:to_lower(binary_to_list(MethodBin))),
+  request(Method, URL, Headers, Body);
+request(Method, URLBin, Headers, Body) when is_binary(URLBin) ->
+  request(Method, binary_to_list(URLBin), Headers, Body);
+request(Method, URL, Headers, Body) when Method =:= post; Method =:= put ->
+  request(Method, {URL, property_bin_to_str(?WITH_DEFAULT_HEADERS(Headers)),
+                   "application/x-www-form-urlencode", Body});
+request(Method, URL, Headers, _Body) ->
+  request(Method, {URL, property_bin_to_str(?WITH_DEFAULT_HEADERS(Headers))}).
 
-receive_data(Pid, Tag, StreamRef) ->
-  receive_data(Pid, Tag, StreamRef, []).
-
-receive_data(Pid, Tag, StreamRef, DataAcc) ->
-  receive
-    {'DOWN', Tag, _, _, Reason} ->
-      {error, {incomplete, Reason}};
-    {gun_data, Pid, StreamRef, nofin, Data} ->
-      receive_data(Pid, Tag, StreamRef, [Data | DataAcc]);
-    {gun_data, Pid, StreamRef, fin, Data} ->
-      {ok, lists:reverse([Data | DataAcc])}
-  after 1000 ->
-      {error, timeout}
-  end.
+request(Method, Request) ->
+% pecypc_log:info({req, Method, URL, Body}),
+  {ok, {{_, Status, _}, _RespHeaders, RespBody}} = httpc:request(Method, Request, [], []),
+  {ok, Status, list_to_binary(RespBody)}.
 
 make_uri(Scheme, Host, Path) ->
   << Scheme/binary, "://", Host/binary, Path/binary >>.
@@ -81,6 +70,16 @@ binary_join([H], _Sep) ->
   << H/binary >>;
 binary_join([H | T], Sep) ->
   << H/binary, Sep/binary, (binary_join(T, Sep))/binary >>.
+
+property_bin_to_str(Props) when is_list(Props) ->
+  lists:map(fun property_bin_to_str/1, Props);
+property_bin_to_str({K, V}) when is_binary(K) ->
+  property_bin_to_str({binary_to_list(K), V});
+property_bin_to_str({K, V}) when is_binary(V) ->
+  property_bin_to_str({K, binary_to_list(V)});
+property_bin_to_str({K, V}) when is_list(K), is_list(V) ->
+  {K, V}.
+
 
 parse(JSON) ->
   case jsx:decode(JSON, [{error_handler, fun(_, _, _) -> {error, badarg} end}])
