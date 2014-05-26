@@ -13,57 +13,40 @@
 -export([urlencode/1]).
 -export([make_uri/3]).
 
--record(client, {
-  state = wait :: wait | request | response | response_body,
-  opts = [] :: [any()],
-  socket = undefined :: undefined | inet:socket(),
-  transport = undefined :: module(),
-  timeout = 5000 :: timeout(), %% @todo Configurable.
-  buffer = <<>> :: binary(),
-  connection = keepalive :: keepalive | close,
-  version = 'HTTP/1.1' :: cowboy_http:version(),
-  response_body = undefined :: undefined | non_neg_integer()
-}).
-
-request(Method, URL, Headers, Body) ->
-% pecypc_log:info({req, Method, URL, Body}),
-  {ok, Client0} = cowboy_client:init([]),
-  % NB: have to degrade protocol to not allow chunked responses
-  Client = Client0#client{version = 'HTTP/1.0'},
-  {ok, Client2} = cowboy_client:request(Method, URL, [
-      {<<"connection">>, <<"close">>},
-      {<<"accept-encoding">>, <<"identity">>},
-      % {<<"accept">>, <<"application/json, text/html">>},
-      {<<"accept">>, <<"application/json">>},
-      {<<"content-type">>, <<"application/x-www-form-urlencoded">>},
-      {<<"pragma">>, <<"no-cache">>},
-      {<<"cache-control">>,
+-define(WITH_DEFAULT_HEADERS(Headers),
+        [
+         {<<"connection">>, <<"close">>},
+         {<<"accept-encoding">>, <<"identity">>},
+         %% {<<"accept">>, <<"application/json, text/html">>},
+         {<<"accept">>, <<"application/json">>},
+         {<<"content-type">>, <<"application/x-www-form-urlencoded">>},
+         {<<"pragma">>, <<"no-cache">>},
+         {<<"cache-control">>,
           <<"private, max-age: 0, no-cache, must-revalidate">>}
-      | Headers
-    ], Body, Client),
-  Result = case cowboy_client:response(Client2) of
-    {ok, Status, _ResHeaders, Client3} ->
-      case Client3#client.state of
-        % @fixme dirty hack, reports only first read chunk
-        request ->
-% pecypc_log:info({buffer, _Status, Client3}),
-          {ok, Status, Client3#client.buffer};
-        response_body ->
-          case cowboy_client:response_body(Client3) of
-            {ok, ResBody, _} ->
-% pecypc_log:info({body, _Status, ResBody}),
-              % @todo analyze Status
-              {ok, Status, ResBody};
-            Else ->
-              Else
-          end
-      end;
-    _Else ->
-% pecypc_log:info({reqerr, _Else}),
-      {error, <<"server_error">>}
-  end,
-% pecypc_log:info({res, Result}),
-  Result.
+         | Headers]).
+
+-spec request(Method, URL, Headers, Body) ->
+  {ok, Status, RespBody} | {error, any()} when Method :: binary() | string(),
+                                               URL :: binary() | string(),
+                                               Headers :: [proplists:property()],
+                                               Body :: string() | binary(),
+                                               Status :: non_neg_integer(),
+                                               RespBody :: binary().
+request(MethodBin, URL, Headers, Body) when is_binary(MethodBin) ->
+  Method = list_to_atom(string:to_lower(binary_to_list(MethodBin))),
+  request(Method, URL, Headers, Body);
+request(Method, URLBin, Headers, Body) when is_binary(URLBin) ->
+  request(Method, binary_to_list(URLBin), Headers, Body);
+request(Method, URL, Headers, Body) when Method =:= post; Method =:= put ->
+  request(Method, {URL, ?WITH_DEFAULT_HEADERS(Headers),
+                   "application/x-www-form-urlencode", Body});
+request(Method, URL, Headers, _Body) ->
+  request(Method, {URL, ?WITH_DEFAULT_HEADERS(Headers)}).
+
+request(Method, Request) ->
+% pecypc_log:info({req, Method, URL, Body}),
+  {ok, {{_, Status, _}, _RespHeaders, RespBody}} = httpc:request(Method, Request, [], []),
+  {ok, Status, list_to_binary(RespBody)}.
 
 make_uri(Scheme, Host, Path) ->
   << Scheme/binary, "://", Host/binary, Path/binary >>.
@@ -87,6 +70,16 @@ binary_join([H], _Sep) ->
   << H/binary >>;
 binary_join([H | T], Sep) ->
   << H/binary, Sep/binary, (binary_join(T, Sep))/binary >>.
+
+property_bin_to_str(Props) when is_list(Props) ->
+  lists:map(fun property_bin_to_str/1, Props);
+property_bin_to_str({K, V}) when is_binary(K) ->
+  property_bin_to_str({binary_to_list(K), V});
+property_bin_to_str({K, V}) when is_binary(V) ->
+  property_bin_to_str({K, binary_to_list(V)});
+property_bin_to_str({K, V}) when is_list(K), is_list(V) ->
+  {K, V}.
+
 
 parse(JSON) ->
   case jsx:decode(JSON, [{error_handler, fun(_, _, _) -> {error, badarg} end}])
