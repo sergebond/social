@@ -69,7 +69,7 @@ make_uri(Scheme, Host, Path) ->
   << Scheme/binary, "://", Host/binary, Path/binary >>.
 
 urlencode(Bin) when is_binary(Bin) ->
-  cowboy_http:urlencode(Bin);
+  cow_qs:urlencode(Bin);
 urlencode(Atom) when is_atom(Atom) ->
   urlencode(atom_to_binary(Atom, latin1));
 urlencode(Int) when is_integer(Int) ->
