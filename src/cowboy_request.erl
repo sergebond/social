@@ -1,9 +1,3 @@
-%%
-%%------------------------------------------------------------------------------
-%% !!! Hackish reuse of cowboy_client undocumented interface !!!
-%%------------------------------------------------------------------------------
-%%
-
 -module(cowboy_request).
 -author('Vladimir Dronnikov <dronnikov@gmail.com>').
 
@@ -13,57 +7,36 @@
 -export([urlencode/1]).
 -export([make_uri/3]).
 
--record(client, {
-  state = wait :: wait | request | response | response_body,
-  opts = [] :: [any()],
-  socket = undefined :: undefined | inet:socket(),
-  transport = undefined :: module(),
-  timeout = 5000 :: timeout(), %% @todo Configurable.
-  buffer = <<>> :: binary(),
-  connection = keepalive :: keepalive | close,
-  version = 'HTTP/1.1' :: cowboy_http:version(),
-  response_body = undefined :: undefined | non_neg_integer()
-}).
 
+request(Method, URL, Headers, Body) when Method =:= <<"POST">> orelse
+                                         Method =:= <<"GET">> orelse
+                                         Method =:= <<"PUT">> ->
+  Method1 = list_to_atom(strings:lower(binary_to_list(Method))),
+  request(Method1, URL, Headers, Body);
+request(Method, URL, Headers, Body) when is_binary(Method) ->
+  request(Method, binary_to_list(URL), Headers, Body);
 request(Method, URL, Headers, Body) ->
 % pecypc_log:info({req, Method, URL, Body}),
-  {ok, Client0} = cowboy_client:init([]),
   % NB: have to degrade protocol to not allow chunked responses
-  Client = Client0#client{version = 'HTTP/1.0'},
-  {ok, Client2} = cowboy_client:request(Method, URL, [
-      {<<"connection">>, <<"close">>},
-      {<<"accept-encoding">>, <<"identity">>},
-      % {<<"accept">>, <<"application/json, text/html">>},
-      {<<"accept">>, <<"application/json">>},
-      {<<"content-type">>, <<"application/x-www-form-urlencoded">>},
-      {<<"pragma">>, <<"no-cache">>},
-      {<<"cache-control">>,
-          <<"private, max-age: 0, no-cache, must-revalidate">>}
-      | Headers
-    ], Body, Client),
-  Result = case cowboy_client:response(Client2) of
-    {ok, Status, _ResHeaders, Client3} ->
-      case Client3#client.state of
-        % @fixme dirty hack, reports only first read chunk
-        request ->
-% pecypc_log:info({buffer, _Status, Client3}),
-          {ok, Status, Client3#client.buffer};
-        response_body ->
-          case cowboy_client:response_body(Client3) of
-            {ok, ResBody, _} ->
-% pecypc_log:info({body, _Status, ResBody}),
-              % @todo analyze Status
-              {ok, Status, ResBody};
-            Else ->
-              Else
-          end
-      end;
-    _Else ->
-% pecypc_log:info({reqerr, _Else}),
-      {error, <<"server_error">>}
-  end,
-% pecypc_log:info({res, Result}),
-  Result.
+  Headers = [{<<"connection">>, <<"close">>},
+             {<<"accept-encoding">>, <<"identity">>},
+             % {<<"accept">>, <<"application/json, text/html">>},
+             {<<"accept">>, <<"application/json">>},
+             {<<"pragma">>, <<"no-cache">>},
+             {<<"cache-control">>,
+              <<"private, max-age: 0, no-cache, must-revalidate">>}
+             | Headers],
+  Req = {URL,
+         headers_to_strings(Headers),
+         <<"application/x-www-form-urlencoded">>,
+         Body},
+  Options = [{body_format, binary}, full_result, false],
+  case httpc:request(Method, Req, [], Options) of
+    {error, Reason} ->
+      {error, Reason};
+    {Status, RespBody} ->
+      {ok, Status, RespBody}
+  end.
 
 make_uri(Scheme, Host, Path) ->
   << Scheme/binary, "://", Host/binary, Path/binary >>.
@@ -80,6 +53,9 @@ urlencode({K, V}) ->
   << (urlencode(K))/binary, $=, (urlencode(V))/binary >>;
 urlencode(List) when is_list(List) ->
   binary_join([urlencode(X) || X <- List], << $& >>).
+
+headers_to_strings(Headers) ->
+  [{binary_to_list(Field), binary_to_list(Value)} || {Field, Value} <- Headers].
 
 binary_join([], _Sep) ->
   <<>>;
