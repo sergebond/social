@@ -17,7 +17,8 @@
 
 -export([
     get_html/2,
-    get_json/2
+    get_json/2,
+    get_options/1
   ]).
 
 -record(state, {
@@ -121,6 +122,9 @@ get_json(Req, State) ->
     Else ->
       Else
   end.
+
+get_options(#state{options = Opts}) ->
+  Opts.
 
 %%
 %% User agent initiates the flow.

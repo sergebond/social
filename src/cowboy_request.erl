@@ -7,34 +7,34 @@
 -export([urlencode/1]).
 -export([make_uri/3]).
 
+-define(DefaultContentType, "application/x-www-form-urlencoded").
+-define(DefaultHeaders, [{<<"connection">>, <<"close">>},
+                         {<<"accept-encoding">>, <<"identity">>},
+                         % {<<"accept">>, <<"application/json, text/html">>},
+                         {<<"accept">>, <<"application/json">>},
+                         {<<"pragma">>, <<"no-cache">>},
+                         {<<"cache-control">>,
+                          <<"private, max-age: 0, no-cache, must-revalidate">>}]).
 
 request(Method, URL, Headers, Body) when Method =:= <<"POST">> orelse
                                          Method =:= <<"GET">> orelse
                                          Method =:= <<"PUT">> ->
-  Method1 = list_to_atom(strings:lower(binary_to_list(Method))),
+  Method1 = list_to_atom(string:to_lower(binary_to_list(Method))),
   request(Method1, URL, Headers, Body);
-request(Method, URL, Headers, Body) when is_binary(Method) ->
+request(Method, URL, Headers, Body) when is_binary(URL) ->
   request(Method, binary_to_list(URL), Headers, Body);
 request(Method, URL, Headers, Body) ->
 % pecypc_log:info({req, Method, URL, Body}),
   % NB: have to degrade protocol to not allow chunked responses
-  Headers = [{<<"connection">>, <<"close">>},
-             {<<"accept-encoding">>, <<"identity">>},
-             % {<<"accept">>, <<"application/json, text/html">>},
-             {<<"accept">>, <<"application/json">>},
-             {<<"pragma">>, <<"no-cache">>},
-             {<<"cache-control">>,
-              <<"private, max-age: 0, no-cache, must-revalidate">>}
-             | Headers],
-  Req = {URL,
-         headers_to_strings(Headers),
-         <<"application/x-www-form-urlencoded">>,
-         Body},
-  Options = [{body_format, binary}, full_result, false],
+  {ok, Headers1, ContentType} = build_headers(Headers),
+  Req = if Method =:= get -> {URL, Headers1};
+           true           -> {URL, Headers1, ContentType, Body}
+        end,
+  Options = [{body_format, binary}, {full_result, false}],
   case httpc:request(Method, Req, [], Options) of
     {error, Reason} ->
       {error, Reason};
-    {Status, RespBody} ->
+    {ok, {Status, RespBody}} ->
       {ok, Status, RespBody}
   end.
 
@@ -53,6 +53,18 @@ urlencode({K, V}) ->
   << (urlencode(K))/binary, $=, (urlencode(V))/binary >>;
 urlencode(List) when is_list(List) ->
   binary_join([urlencode(X) || X <- List], << $& >>).
+
+build_headers(Headers) ->
+  build_headers(Headers, ?DefaultHeaders).
+
+build_headers(Headers, DefaultHeaders) ->
+  StringHeaders = headers_to_strings(Headers ++ DefaultHeaders),
+  case lists:keytake("content-type", 1, StringHeaders) of
+    false ->
+      {ok, StringHeaders, ?DefaultContentType};
+    {value, {_, ContentType}, StringHeaders1} ->
+      {ok, StringHeaders1, ContentType}
+  end.
 
 headers_to_strings(Headers) ->
   [{binary_to_list(Field), binary_to_list(Value)} || {Field, Value} <- Headers].
@@ -89,5 +101,6 @@ post_for_json(URL, Data) ->
     ], urlencode(Data))
   of
     {ok, 200, JSON} -> parse(JSON);
-    _Else -> {error, badarg}
+    {ok, Status, _} -> {error, {bad_status, Status}};
+    {error, Reason} -> {error, Reason}
   end.
