@@ -7,8 +7,9 @@
     kernel,
     stdlib,
     ssl,
-    cowboy,
-    inets
+    inets,
+    cowlib,
+    jsx
   ]},
   {env, []}
 ]}.
