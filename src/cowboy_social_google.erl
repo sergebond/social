@@ -58,7 +58,6 @@ user_profile(Token, _Opts) ->
     {email, key(<<"email">>, Profile)},
     {name, key(<<"name">>, Profile)},
     {picture, key(<<"picture">>, Profile)},
-    {gender, key(<<"gender">>, Profile)},
     {locale, key(<<"locale">>, Profile)},
     {raw, Profile}
   ]}.
