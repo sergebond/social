@@ -97,11 +97,12 @@ get_html(Req, State) ->
     {Result, Req2, State2} when is_binary(Result) ->
       {ok, Req3} = cowboy_req:reply(200, [], <<
         "<script>",
-        "window.atoken=", Result/binary, ";",
-        "if(window.atoken&&window.opener){",
-          "window.opener.atoken=window.atoken;"
-          "window.close();",
-        "}",
+%%        "window.atoken=", Result/binary, ";",
+%%        "if(window.atoken&&window.opener){",
+%%          "window.opener.atoken=window.atoken;"
+%%          "window.close();",
+%%        "}",
+        "window.opener.setValue(", Result/binary, ");"
         "</script>"
         >>, Req2),
       {halt, Req3, State2};
