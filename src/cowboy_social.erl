@@ -96,14 +96,10 @@ get_html(Req, State) ->
   case get_json(Req, State) of
     {Result, Req2, State2} when is_binary(Result) ->
       {ok, Req3} = cowboy_req:reply(200, [], <<
-        "<script>",
-%%        "window.atoken=", Result/binary, ";",
-%%        "if(window.atoken&&window.opener){",
-%%          "window.opener.atoken=window.atoken;"
-%%          "window.close();",
-%%        "}",
-        "window.opener.setValue(", Result/binary, ");"
-        "</script>"
+        "<html><head></head><body>
+        <input name=\"token\" value=", Result/binary," type=\"hidden\" id=\"token\" />
+        </body></html>
+        "
         >>, Req2),
       {halt, Req3, State2};
     {html, Result, Req2, State2} ->
