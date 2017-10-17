@@ -57,9 +57,8 @@ user_profile(Token, _Opts) ->
     {provider, <<"google">>},
     {email, key(<<"email">>, Profile)},
     {name, key(<<"name">>, Profile)},
-    {given_name, key(<<"given_name">>, Profile)},
-    {family_name, key(<<"family_name">>, Profile)},
     {picture, key(<<"picture">>, Profile)},
+    {gender, key(<<"gender">>, Profile)},
     {locale, key(<<"locale">>, Profile)},
     {raw, Profile}
   ]}.
