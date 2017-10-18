@@ -97,7 +97,8 @@ get_html(Req, State) ->
     {Result, Req2, State2} when is_binary(Result) ->
       {ok, Req3} = cowboy_req:reply(200, [], <<
         "<script>",
-        "parent.postMessage(",Result/binary,", \"*\");",
+          "window.opener.postMessage(",Result/binary,", \"*\");",
+          "window.close();"
         "</script>"
         >>, Req2),
       {halt, Req3, State2};
